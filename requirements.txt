@@ -1,8 +1,8 @@
 # Runtime
-# pydantic v2 is required by the code. The lower bound follows google-genai's own fix for the pydantic range.
+# pydantic v2: the code uses field_validator and model_validate_json (v2 API).
 pydantic>=2.9,<3
-# Official Google Gen AI SDK (not the old google.generativeai). The cap avoids an unreviewed major-version API change.
+# Official Google Gen AI SDK (not the old google.generativeai).
 google-genai>=1.47.0,<2
 
-# Tests (async tests run with asyncio.run, so no pytest-asyncio is needed)
+# Tests: async tests run with asyncio.run, so pytest-asyncio is not needed.
 pytest>=8.0,<10
