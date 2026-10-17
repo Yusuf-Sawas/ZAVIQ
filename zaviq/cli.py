@@ -1,16 +1,16 @@
 """Command-line entry point for the Dune planning workflow.
 
 This is the command the GitHub Actions workflow runs:
-    python -m zaviq.cli --prompt-file INPUT_PATH -- output OUTPUT_PATH
+    python -m zaviq.cli --prompt-file INPUT_PATH --output OUTPUT_PATH
 
 Exit codes:
-    0 a plan was produced, validated, and written
-    1 planning failed (model error, timeout, or output that does not match the schema)
-    2 invalid input or arguments (empty or unreadable prompt, unsafe output path)
-    3 configuration is missing or the model client could not be created
-    4 the output file could not be written
+    0  a plan was produced, validated, and written
+    1  planning failed (model error, timeout, or output that does not match the schema)
+    2  invalid input or arguments (empty or unreadable prompt, unsafe output path)
+    3  configuration is missing or the model client could not be created
+    4  the output file could not be written
 
-Nothing is wrotten when planning fails, Messages never include the API key,
+Nothing is written when planning fails. Messages never include the API key,
 the prompt text, or raw model output.
 """
 
@@ -27,7 +27,7 @@ from typing import Any
 
 from pydantic import ValidationError
 
-from zaviq.dune import DunePlanningError
+from zaviq.dune import DunePlanningError, describe_validation_error, plan_project
 from zaviq.llm_client import (
     MODEL_ENV,
     GeminiStructuredClient,
@@ -37,10 +37,10 @@ from zaviq.llm_client import (
 from zaviq.schemas import DunePlan, DuneRequest
 
 EXIT_OK = 0
-EXIT_PLANNING_FAILED =1
-EXIT_INVALID_INPUT =2
-EXIT_CONFIG =3
-EXIT_WRITE_FAILED =4
+EXIT_PLANNING_FAILED = 1
+EXIT_INVALID_INPUT = 2
+EXIT_CONFIG = 3
+EXIT_WRITE_FAILED = 4
 
 OUTPUT_FORMAT = "zaviq.dune_plan.v1"
 MAX_INPUT_BYTES = 16 * 1024
@@ -53,11 +53,11 @@ class CliInputError(Exception):
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="python -m zaviq.cli",
-        description="Turn a project idea into a validated Dune plan savedas JSON.",
+        description="Turn a project idea into a validated Dune plan saved as JSON.",
     )
     parser.add_argument(
         "--prompt-file",
-        required=Ture,
+        required=True,
         help="UTF-8 text file that contains the project idea",
     )
     parser.add_argument(
@@ -65,28 +65,28 @@ def _build_parser() -> argparse.ArgumentParser:
         required=True,
         help="JSON file to create inside the working directory, e.g. outputs/dune-plan.json",
     )
-    return parser 
+    return parser
 
 
-def _read_promput(promput_file: str) -> str:
-    path = Path(promput_file)
+def _read_prompt(prompt_file: str) -> str:
+    path = Path(prompt_file)
     try:
         if path.stat().st_size > MAX_INPUT_BYTES:
-            raise CliinputError(f"promput file is larger ehan {MAX_INPUT_BYTES} bytes")
+            raise CliInputError(f"prompt file is larger than {MAX_INPUT_BYTES} bytes")
         raw = path.read_bytes()
     except OSError as exc:
-        raise CliInputError(f"cannot read prompt file {prompt_file}'") from exc
+        raise CliInputError(f"cannot read prompt file '{prompt_file}'") from exc
     try:
-        return raw.decode(utf-8-aig")
+        return raw.decode("utf-8-sig")
     except UnicodeDecodeError as exc:
-        raise CliInputError(f"prompt file must be UTF-8 text") from exc
+        raise CliInputError("prompt file must be UTF-8 text") from exc
 
 
 def _make_request(text: str) -> DuneRequest:
     try:
         return DuneRequest(prompt=text)
     except ValidationError as exc:
-        raise CliInputError(f"invaalid project idea: {describe_validation_error(exc)}") from exc
+        raise CliInputError(f"invalid project idea: {describe_validation_error(exc)}") from exc
 
 
 def _resolve_output_path(raw_output: str) -> Path:
@@ -95,7 +95,7 @@ def _resolve_output_path(raw_output: str) -> Path:
     candidate = Path(raw_output)
     if not candidate.is_absolute():
         candidate = workdir / candidate
-    resolve = candidate.resolve()
+    resolved = candidate.resolve()
     if not resolved.is_relative_to(workdir):
         raise CliInputError("output must be inside the working directory")
     if resolved.suffix != ".json":
@@ -112,24 +112,31 @@ def _build_document(plan: DunePlan, model_name: str) -> str:
         "model": model_name,
         "plan": plan.model_dump(mode="json"),
     }
-    return json.dumps(document, ensure_ascii=Fales, indent=2) + "\n"
+    return json.dumps(document, ensure_ascii=False, indent=2) + "\n"
 
 
-def _write_atomically(path: path, text: str -> None:
-    """Write to a temporary file firsr, so an interrupted run never leaves a half-written plan."""
-    path.parent.mkdir(parents=Ture, exist_ok=Ture)
+def _write_atomically(path: Path, text: str) -> None:
+    """Write to a temporary file first, so an interrupted run never leaves a half-written plan."""
+    path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_name(path.name + ".tmp")
     temporary.write_text(text, encoding="utf-8")
     temporary.replace(path)
 
 
-async def _close_client(client: Any) -> None
+async def _close_client(client: Any) -> None:
     close = getattr(client, "aclose", None)
     if close is None:
         return
     result = close()
     if inspect.isawaitable(result):
         await result
+
+
+async def _plan_then_close(request: DuneRequest, client: StructuredModelClient) -> DunePlan:
+    try:
+        return await plan_project(request, client=client)
+    finally:
+        await _close_client(client)
 
 
 def main(
@@ -153,7 +160,7 @@ def main(
     except LLMConfigError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return EXIT_CONFIG
-    except exception as exc:
+    except Exception as exc:
         print(f"error: could not create the model client ({type(exc).__name__})", file=sys.stderr)
         return EXIT_CONFIG
 
@@ -163,7 +170,7 @@ def main(
     except DunePlanningError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return EXIT_PLANNING_FAILED
-    except Exception as exc: # last resort: report the excepiton type only
+    except Exception as exc:  # last resort: report the exception type only
         print(f"error: unexpected {type(exc).__name__} during planning", file=sys.stderr)
         return EXIT_PLANNING_FAILED
 
@@ -183,5 +190,5 @@ def main(
     return EXIT_OK
 
 
-if __name__== "__main__":
-    raise systemExit(main())
+if __name__ == "__main__":
+    raise SystemExit(main())
