@@ -1,1 +1,21 @@
-Hi
+name: ZAVIQ checks
+
+on:
+    push:
+    pull_request:
+    workflow__dispatch:
+      inputs:
+        prompt:
+          description: "A general, non-sensitive project idea. Never put secrets here."
+          required: true
+          type string
+
+permissions:
+  contents: read
+
+jobs:
+  tests:
+    name: Offline tests
+    if: github.event_name != 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    
